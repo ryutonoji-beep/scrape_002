@@ -1,0 +1,36 @@
+name: Scraper Workflow
+
+on:
+  repository_dispatch:
+    types: [start_scraping] # GASからこのイベント名でキックされる
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Create input.json from Payload
+        # GASから渡されたJSONデータを input.json としてファイル出力する
+        run: echo '${{ toJSON(github.event.client_payload.items) }}' > input.json
+
+      - name: Install Dependencies
+        run: npm install
+
+      - name: Run Scraper
+        run: node scraper.js
+
+      - name: Commit and Push result.json
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add result.json
+          # 変更がある場合のみコミット
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update result.json via Actions"
+          git push
