@@ -4,12 +4,17 @@ const fs = require('fs');
 
 puppeteer.use(StealthPlugin());
 
+// ==========================================
+// ⚙️ 動作パラメーター設定
+// ==========================================
 const CONFIG = {
-  CRAWL_DELAY: 65 * 1000,
-  PAGE_TIMEOUT: 30 * 1000,
-  POST_LOAD_WAIT: 2 * 1000,
-  CHUNK_SIZE: 2,
+  MIN_DELAY: 60 * 1000,            // 最小待機時間（60秒）
+  MAX_DELAY: 90 * 1000,            // 最大待機時間（90秒）
+  PAGE_TIMEOUT: 30 * 1000,         // ページの読み込み限界時間（30秒）
+  POST_LOAD_WAIT: 2 * 1000,        // ページ読み込み完了後の追加待機（2秒）
+  CHUNK_SIZE: 2,                   // 同時にアクセスするURL数（2件）
 };
+// ==========================================
 
 async function scrapeSingleItem(item, browser) {
   let page;
@@ -17,6 +22,7 @@ async function scrapeSingleItem(item, browser) {
     page = await browser.newPage();
     await page.setRequestInterception(true);
     page.on('request', (request) => {
+      // 余計なリソースは読み込まずに高速化＆通信量削減
       if (['image', 'stylesheet', 'font', 'media'].includes(request.resourceType())) request.abort();
       else request.continue();
     });
@@ -26,9 +32,11 @@ async function scrapeSingleItem(item, browser) {
     const response = await page.goto(item.url, { waitUntil: 'networkidle2', timeout: CONFIG.PAGE_TIMEOUT });
     const status = response ? response.status() : 0;
 
+    // ★ WAFブロック等 ハードエラー検知
     if (status === 403 || status === 429 || status >= 500) {
       console.warn(`🚨 アクセス拒否検知 (ステータス: ${status}) [${item.row}行目]`);
-      return { _isError: true, item: item }; 
+      item._isBlocked = true; // GASにブロックを知らせるフラグ
+      return item;
     }
 
     await new Promise(resolve => setTimeout(resolve, CONFIG.POST_LOAD_WAIT));
@@ -62,9 +70,11 @@ async function scrapeSingleItem(item, browser) {
     console.log(`✅ 取得成功 [${item.row}行目]: ${pageTitle}`);
     item.priceData = priceData;
     return item;
+
   } catch (error) {
-    console.error(`❌ エラー [${item.row}行目]: ${error.message}`);
-    item.priceData = []; // 失敗
+    // ★ タイムアウト等のソフトエラー検知
+    console.error(`⚠️ 一時エラー (タイムアウト等) [${item.row}行目]: ${error.message}`);
+    item._isSoftError = true; // GASに一時エラーを知らせるフラグ
     return item;
   } finally {
     if (page) await page.close();
@@ -72,6 +82,7 @@ async function scrapeSingleItem(item, browser) {
 }
 
 async function runScrapingLoop() {
+  // Actions側で生成された input.json を読み込む
   const rawData = fs.readFileSync('input.json', 'utf-8');
   const items = JSON.parse(rawData);
   let results = [];
@@ -89,35 +100,30 @@ async function runScrapingLoop() {
     
     const chunkResults = await Promise.all(chunkItems.map(item => scrapeSingleItem(item, browser)));
     
-    // エラー（ブロック）が1件でもあった場合の処理
-    const errorResult = chunkResults.find(res => res._isError);
-    if (errorResult) {
-      console.log(`\n🚨 サイト側からのブロックを検知しました。以降の処理を打ち切ります。`);
-      
-      // 成功した分は格納
-      results.push(...chunkResults.filter(res => !res._isError));
-      
-      // 今回のチャンクの失敗分 ＋ まだ処理していない残りのURL 全てにエラーフラグを付ける
-      const remainingItems = items.slice(i).map(item => {
-        item.priceData = "取得失敗(ブロック)";
-        return item;
-      });
-      results.push(...remainingItems);
+    // チャンク内にブロックされたものが1つでもあれば、即座に白旗を上げる
+    const blockedItem = chunkResults.find(res => res._isBlocked);
+    if (blockedItem) {
+      console.log(`\n🚨 WAFブロックを検知しました。現在のIPでの処理を打ち切り、撤退します。(残りは次回のIPガチャへ託す)`);
+      results.push(...chunkResults); 
+      // 残りのアイテムは results に追加しない = GAS側で空欄のまま保持される
       break; 
     }
 
     results.push(...chunkResults);
 
     if (i + CONFIG.CHUNK_SIZE < items.length) {
-      console.log(`⏳ crawl-delay: ${CONFIG.CRAWL_DELAY / 1000}秒待機します...`);
-      await new Promise(resolve => setTimeout(resolve, CONFIG.CRAWL_DELAY));
+      // ★ 60秒〜90秒の間でランダムな待機時間を生成
+      const waitTime = Math.floor(Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1)) + CONFIG.MIN_DELAY;
+      console.log(`⏳ ${waitTime / 1000}秒待機します... (ランダムディレイ)`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
 
   await browser.close();
   
+  // 結果を保存してActionsの次ステップ(コミット)へ渡す
   fs.writeFileSync('result.json', JSON.stringify(results, null, 2), 'utf-8');
-  console.log(`\n🎉 処理が終了しました。リポジトリに保存します。`);
+  console.log(`\n🎉 処理・撤退完了（取得/判定済み件数: ${results.length}件）。リポジトリに保存します。`);
 }
 
 runScrapingLoop();
