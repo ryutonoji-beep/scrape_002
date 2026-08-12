@@ -2,7 +2,7 @@ name: Scraper Workflow
 
 on:
   repository_dispatch:
-    types: [start_scraping] # GASのペイロード(event_type)と一致させる
+    types: [start_scraping] # GASからキックされるイベント名
 
 jobs:
   scrape:
@@ -17,7 +17,7 @@ jobs:
           node-version: '18'
 
       - name: Create input.json from Payload
-        # GASから渡されたJSONデータを Actions実行時の仮想環境内にだけ生成する
+        # GASから渡されたJSONデータを動的に生成 (リポジトリは汚れない)
         run: echo '${{ toJSON(github.event.client_payload.items) }}' > input.json
 
       - name: Install Dependencies
@@ -26,11 +26,10 @@ jobs:
       - name: Run Scraper
         run: node scraper.js
 
-      - name: Commit and Push result.json
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add result.json
-          # 変更がある場合のみコミットしてプッシュ
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update result.json via Actions"
-          git push
+      - name: Upload Result Artifact
+        # コミットする代わりに、Artifact（成果物）としてZIPで一時保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: result-data
+          path: result.json
+          retention-days: 1 # 1日経つとGitHubから自動で消去される
