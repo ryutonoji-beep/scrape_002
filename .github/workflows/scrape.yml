@@ -2,7 +2,7 @@ name: Scraper Workflow
 
 on:
   repository_dispatch:
-    types: [start_scraping] # GASからこのイベント名でキックされる
+    types: [start_scraping] # GASのペイロード(event_type)と一致させる
 
 jobs:
   scrape:
@@ -17,7 +17,7 @@ jobs:
           node-version: '18'
 
       - name: Create input.json from Payload
-        # GASから渡されたJSONデータを input.json としてファイル出力する
+        # GASから渡されたJSONデータを Actions実行時の仮想環境内にだけ生成する
         run: echo '${{ toJSON(github.event.client_payload.items) }}' > input.json
 
       - name: Install Dependencies
@@ -31,6 +31,6 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add result.json
-          # 変更がある場合のみコミット
+          # 変更がある場合のみコミットしてプッシュ
           git diff --quiet && git diff --staged --quiet || git commit -m "Update result.json via Actions"
           git push
