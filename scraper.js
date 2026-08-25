@@ -6,7 +6,7 @@ puppeteer.use(StealthPlugin());
 
 const CONFIG = {
   MIN_DELAY: 60 * 1000,            // 最小待機時間（60秒）
-  MAX_DELAY: 70 * 1000,            // 最大待機時間（70秒）
+  MAX_DELAY: 80 * 1000,            // 最大待機時間（80秒）
   PAGE_TIMEOUT: 30 * 1000,         // タイムアウト
   POST_LOAD_WAIT: 2 * 1000,        // 描画待ち
 };
