@@ -12,7 +12,9 @@ async function scrapeSingleItemWithFlareSolverr(item) {
     const payload = {
       cmd: 'request.get',
       url: item.url,
-      maxTimeout: 60000 // Cloudflareのチャレンジを解くための猶予(60秒)
+      maxTimeout: 60000, 
+      // ★ ここを追加！ページ読み込み後に強制的に5秒（5000ms）待機させる
+      postTimeout: 5000 
     };
 
     const response = await fetch(CONFIG.FLARESOLVERR_URL, {
