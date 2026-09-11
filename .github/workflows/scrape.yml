@@ -3,10 +3,21 @@ name: Scraper Workflow
 on:
   repository_dispatch:
     types: [start_scraping] # GASからキックされるイベント名
+  workflow_dispatch: # 手動実行用（テスト時にあると便利です）
 
 jobs:
   scrape:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest # ★必ず ubuntu-latest に戻す必要があります（Dockerを使うため）
+
+    # ★ FlareSolverrをバックグラウンドで起動する設定
+    services:
+      flaresolverr:
+        image: ghcr.io/flaresolverr/flaresolverr:latest
+        ports:
+          - 8191:8191
+        options: >-
+          -e LOG_LEVEL=info
+
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
@@ -17,17 +28,21 @@ jobs:
           node-version: '18'
 
       - name: Create input.json from Payload
-        # GASから渡されたJSONデータを動的に生成 (リポジトリは汚れない)
+        # GASから渡されたJSONデータを動的に生成
         run: echo '${{ toJSON(github.event.client_payload.items) }}' > input.json
 
       - name: Install Dependencies
+        # ※今回の生通信方式では特別なパッケージは不要ですが、念のため残しておきます
         run: npm install
+
+      # ★ 追加：FlareSolverrのコンテナが完全に立ち上がるまで10秒待つ
+      - name: Wait for FlareSolverr to start
+        run: sleep 10
 
       - name: Run Scraper
         run: node scraper.js
 
       - name: Upload Result Artifact
-        # コミットする代わりに、Artifact（成果物）としてZIPで一時保存
         uses: actions/upload-artifact@v4
         with:
           name: result-data
