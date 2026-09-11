@@ -23,6 +23,14 @@ async function scrapeSingleItemWithFlareSolverr(item) {
 
     const result = await response.json();
 
+    // ★ 追加：FlareSolverrの生レスポンス情報をログに出力（HTML本体は長すぎるので除外）
+    const debugResult = JSON.parse(JSON.stringify(result));
+    if (debugResult.solution && debugResult.solution.response) {
+      debugResult.solution.response = "（省略）";
+    }
+    console.log(`\n🔍 FlareSolverr 生レスポンス [${item.row}行目]:`);
+    console.log(JSON.stringify(debugResult, null, 2));
+
     // 2. FlareSolverrが取得失敗した場合（ブロック等）
     if (result.status === 'error' || !result.solution || !result.solution.response) {
       console.warn(`🚨 FlareSolverrでの取得失敗 [${item.row}行目]: ${result.message || '詳細不明'}`);
