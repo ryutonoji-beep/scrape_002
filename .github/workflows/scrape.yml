@@ -46,5 +46,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: result-data
-          path: result.json
+          path: |
+            result.json
+            debug_html_*.html
           retention-days: 1 # 1日経つとGitHubから自動で消去される
