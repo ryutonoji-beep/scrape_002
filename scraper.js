@@ -5,25 +5,33 @@ const fs = require('fs');
 puppeteer.use(StealthPlugin());
 
 const CONFIG = {
-  MIN_DELAY: 65 * 1000,            // 最小待機時間（60秒）
+  MIN_DELAY: 65 * 1000,            // 最小待機時間（65秒）
   MAX_DELAY: 80 * 1000,            // 最大待機時間（80秒）
-  PAGE_TIMEOUT: 30 * 1000,         // タイムアウト
-  POST_LOAD_WAIT: 2 * 1000,        // 描画待ち
+  PAGE_TIMEOUT: 45 * 1000,         // CSSや画像も読み込むため少し長め(45秒)に設定
+  POST_LOAD_WAIT: 3 * 1000,        // 描画待ち
 };
 
 async function scrapeSingleItem(item, browser) {
   let page;
   try {
     page = await browser.newPage();
-    await page.setRequestInterception(true);
-    page.on('request', (request) => {
-      // 必要なHTMLとスクリプト以外はブロックして高速化・通信量削減
-      if (['image', 'stylesheet', 'font', 'media'].includes(request.resourceType())) request.abort();
-      else request.continue();
-    });
-
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
     
+    // ★ 改善点1: Request Interception（画像やCSSの遮断）を削除し、完全に人間と同じように読み込ませる
+    
+    // ★ 改善点2: ハードコードを避け、動的に取得したUAから「Headless」の文字だけを消す
+    const defaultUA = await browser.userAgent();
+    const cleanUA = defaultUA.replace(/HeadlessChrome/g, 'Chrome');
+    await page.setUserAgent(cleanUA);
+
+    // ★ 改善点3: 人間らしい自然なHTTPヘッダーを付与する
+    await page.setExtraHTTPHeaders({
+      'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+    });
+    
+    // ランダムな画面サイズを設定してさらに偽装（例: 1920x1080）
+    await page.setViewport({ width: 1920, height: 1080 });
+
     const response = await page.goto(item.url, { waitUntil: 'networkidle2', timeout: CONFIG.PAGE_TIMEOUT });
     const status = response ? response.status() : 0;
 
@@ -37,7 +45,7 @@ async function scrapeSingleItem(item, browser) {
     await new Promise(resolve => setTimeout(resolve, CONFIG.POST_LOAD_WAIT));
     const pageTitle = await page.title();
 
-    // ★ 改善点：正規表現をやめ、ブラウザ内でJSのグローバル変数「prices」を直接取得
+    // JSのグローバル変数「prices」を直接取得
     const rawJson = await page.evaluate(() => {
       if (typeof prices !== 'undefined') {
         return prices;
@@ -85,10 +93,14 @@ async function runScrapingLoop() {
 
   const browser = await puppeteer.launch({
     headless: "new",
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-blink-features=AutomationControlled']
+    args: [
+      '--no-sandbox', 
+      '--disable-setuid-sandbox', 
+      '--disable-blink-features=AutomationControlled',
+      '--window-size=1920,1080' // ブラウザ起動時にもサイズ指定
+    ]
   });
 
-  // ★ 改善点：Promise.all を廃止し、完全に1件ずつの直列処理に変更（バーストアクセスを防ぐ）
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     console.log(`\n[${i + 1} / ${items.length}] 処理開始...`);
@@ -103,7 +115,6 @@ async function runScrapingLoop() {
     
     results.push(result);
 
-    // 最後のアイテムでなければランダム待機
     if (i < items.length - 1) {
       const waitTime = Math.floor(Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1)) + CONFIG.MIN_DELAY;
       console.log(`⏳ ${waitTime / 1000}秒待機します... (ランダムディレイ)`);
