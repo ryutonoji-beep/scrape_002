@@ -88,6 +88,32 @@ async function scrapeSingleItemWithFlareSolverr(item) {
 }
 
 async function runScrapingLoop() {
+  // ★ ここからテストコードを追加 ★
+  console.log("🔍 [テスト] FlareSolverrの動作確認を行います...");
+  try {
+    const testPayload = {
+      cmd: 'request.get',
+      url: 'https://example.com', // 誰でも絶対に見れるテストサイト
+      maxTimeout: 10000
+    };
+    const testRes = await fetch(CONFIG.FLARESOLVERR_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(testPayload)
+    });
+    const testResult = await testRes.json();
+    
+    if (testResult.solution && testResult.solution.response) {
+      console.log("✅ [テスト成功] FlareSolverrは正常に稼働しています！");
+      console.log("取得したHTML冒頭: " + testResult.solution.response.substring(0, 150) + "...\n");
+    } else {
+      console.log("❌ [テスト失敗] FlareSolverr自体がエラーを吐いています: ", testResult);
+    }
+  } catch (e) {
+    console.log("❌ [テスト失敗] FlareSolverrに接続できません: ", e.message);
+  }
+  // ★ テストコードここまで ★
+  
   const rawData = fs.readFileSync('input.json', 'utf-8');
   const items = JSON.parse(rawData);
   let results = [];
