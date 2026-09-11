@@ -1,61 +1,39 @@
-const puppeteer = require('puppeteer-extra');
-const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const fs = require('fs');
 
-puppeteer.use(StealthPlugin());
-
 const CONFIG = {
-  MIN_DELAY: 65 * 1000,            // 最小待機時間（65秒）
-  MAX_DELAY: 80 * 1000,            // 最大待機時間（80秒）
-  PAGE_TIMEOUT: 45 * 1000,         // CSSや画像も読み込むため少し長め(45秒)に設定
-  POST_LOAD_WAIT: 3 * 1000,        // 描画待ち
+  MIN_DELAY: 5 * 1000,    // 生通信なので5〜10秒の待機で十分！
+  MAX_DELAY: 10 * 1000
 };
 
-async function scrapeSingleItem(item, browser) {
-  let page;
+async function scrapeSingleItem(item) {
   try {
-    page = await browser.newPage();
-    
-    // ★ 改善点1: Request Interception（画像やCSSの遮断）を削除し、完全に人間と同じように読み込ませる
-    
-    // ★ 改善点2: ハードコードを避け、動的に取得したUAから「Headless」の文字だけを消す
-    const defaultUA = await browser.userAgent();
-    const cleanUA = defaultUA.replace(/HeadlessChrome/g, 'Chrome');
-    await page.setUserAgent(cleanUA);
-
-    // ★ 改善点3: 人間らしい自然なHTTPヘッダーを付与する
-    await page.setExtraHTTPHeaders({
-      'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+    // Puppeteerを使わず、直接URLからHTMLテキストをダウンロードする
+    const response = await fetch(item.url, {
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8'
+      }
     });
-    
-    // ランダムな画面サイズを設定してさらに偽装（例: 1920x1080）
-    await page.setViewport({ width: 1920, height: 1080 });
 
-    const response = await page.goto(item.url, { waitUntil: 'networkidle2', timeout: CONFIG.PAGE_TIMEOUT });
-    const status = response ? response.status() : 0;
-
-    // ハードエラー（WAFブロックなど）
-    if (status === 403 || status === 429 || status >= 500) {
+    const status = response.status;
+    if (status === 403 || status === 429 || status === 503) {
       console.warn(`🚨 アクセス拒否検知 (ステータス: ${status}) [${item.row}行目]`);
       item._isBlocked = true; 
       return item;
     }
 
-    await new Promise(resolve => setTimeout(resolve, CONFIG.POST_LOAD_WAIT));
-    const pageTitle = await page.title();
+    const html = await response.text();
 
-    // JSのグローバル変数「prices」を直接取得
-    const rawJson = await page.evaluate(() => {
-      if (typeof prices !== 'undefined') {
-        return prices;
-      }
-      return null;
-    });
+    // 取得したHTMLの文字列の中から、強引に `prices = [...]` のJSON部分だけを切り出す
+    const match = html.match(/prices\s*=\s*(\[.*?\]);/s);
 
     let priceData = [];
-    if (rawJson) {
+    if (match && match[1]) {
+      const rawJson = JSON.parse(match[1]);
       const volumeMap = new Map();
+      
       for (const p of rawJson) {
         const capacityKey = p.volume ? p.volume : "容量なし";
         if (!volumeMap.has(capacityKey)) {
@@ -68,19 +46,20 @@ async function scrapeSingleItem(item, browser) {
         }
       }
       priceData = Array.from(volumeMap.values());
+      console.log(`✅ 取得成功 [${item.row}行目]: (価格データ ${priceData.length}件 抽出)`);
+    } else {
+      console.log(`⚠️ ページは開けましたが、価格データ(prices)が見つかりません [${item.row}行目]`);
+      // Cloudflareの「人間ですか？」画面（チャレンジページ）を食らっている可能性大
+      item._isBlocked = true; 
     }
 
-    console.log(`✅ 取得成功 [${item.row}行目]: ${pageTitle}`);
     item.priceData = priceData;
     return item;
 
   } catch (error) {
-    // タイムアウトなどのソフトエラー
-    console.error(`⚠️ 一時エラー (タイムアウト等) [${item.row}行目]: ${error.message}`);
+    console.error(`⚠️ 一時エラー [${item.row}行目]: ${error.message}`);
     item._isSoftError = true;
     return item;
-  } finally {
-    if (page) await page.close();
   }
 }
 
@@ -89,23 +68,13 @@ async function runScrapingLoop() {
   const items = JSON.parse(rawData);
   let results = [];
 
-  console.log(`🏃‍♂️ ${items.length} 件のスクレイピング処理を開始します...`);
-
-  const browser = await puppeteer.launch({
-    headless: "new",
-    args: [
-      '--no-sandbox', 
-      '--disable-setuid-sandbox', 
-      '--disable-blink-features=AutomationControlled',
-      '--window-size=1920,1080' // ブラウザ起動時にもサイズ指定
-    ]
-  });
+  console.log(`🏃‍♂️ ${items.length} 件の【生通信】スクレイピングを開始します...`);
 
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     console.log(`\n[${i + 1} / ${items.length}] 処理開始...`);
     
-    const result = await scrapeSingleItem(item, browser);
+    const result = await scrapeSingleItem(item);
     
     if (result._isBlocked) {
       console.log(`\n🚨 WAFブロックを検知。現在のIPでの処理を打ち切り撤退します。`);
@@ -117,13 +86,11 @@ async function runScrapingLoop() {
 
     if (i < items.length - 1) {
       const waitTime = Math.floor(Math.random() * (CONFIG.MAX_DELAY - CONFIG.MIN_DELAY + 1)) + CONFIG.MIN_DELAY;
-      console.log(`⏳ ${waitTime / 1000}秒待機します... (ランダムディレイ)`);
+      console.log(`⏳ ${waitTime / 1000}秒待機します...`);
       await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
 
-  await browser.close();
-  
   fs.writeFileSync('result.json', JSON.stringify(results, null, 2), 'utf-8');
   console.log(`\n🎉 処理完了（取得/判定済み件数: ${results.length}件）。Artifactとして保存します。`);
 }
