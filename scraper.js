@@ -38,6 +38,7 @@ async function scrapeSingleItemWithFlareSolverr(item) {
 
     let priceData = [];
     if (match && match[1]) {
+      // 価格データの抽出処理（ここは変更なし）
       const rawJson = JSON.parse(match[1]);
       const volumeMap = new Map();
       
@@ -55,10 +56,17 @@ async function scrapeSingleItemWithFlareSolverr(item) {
       priceData = Array.from(volumeMap.values());
       console.log(`✅ 取得成功 [${item.row}行目]: (価格データ ${priceData.length}件 抽出)`);
     } else {
-      console.log(`⚠️ ページは開けましたが、価格データ(prices)が見つかりません [${item.row}行目]`);
+      // ★ 調査用：価格が見つからなかった場合、そのHTMLをファイルに保存する！
+      console.log(`⚠️ 価格データ(prices)が見つかりません [${item.row}行目]`);
+      
+      // html文字列をファイルに書き出す (ファイル名: debug_html_5.html など)
+      const debugFileName = `debug_html_${item.row}.html`;
+      fs.writeFileSync(debugFileName, html, 'utf-8');
+      console.log(`🔍 デバッグ用HTMLを保存しました: ${debugFileName}`);
+
       item._isSoftError = true; 
     }
-
+    
     item.priceData = priceData;
     return item;
 
